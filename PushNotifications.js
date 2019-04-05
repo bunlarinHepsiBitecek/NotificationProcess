@@ -226,14 +226,15 @@ function getEndpointsForItem(toWhom, data) {
 
 	return new Promise(function(resolve, reject) {
 
-		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredInputData());
+		const additionalDataParsed = parseAdditionalData(data);
+		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredInputData(additionalDataParsed));
 		
 		console.log("query : ", query);
 		console.log("parameter : ", parameter);
 		
 		neo4jSession.run(query, parameter).then(result => {
 			console.log("RESULT promiseResultEndpoints : ", result);
-			resolve(getParsedData(toWhom, result, additionalDataResponse.additionalDataExists));
+			resolve(getParsedData(toWhom, result, additionalDataParsed.additionalDataExists));
 			//resolve(result);
 		})
 		.catch(error => {
@@ -244,13 +245,13 @@ function getEndpointsForItem(toWhom, data) {
 	})
 
 	// create required inputs to get necessary query and parameters
-	function createRequiredInputData() {
+	function createRequiredInputData(additionalDataParsed) {
 		return {
 			fromWhom: data.fromWhom,
 			toWhom: toWhom,
 			requestType: data.requestType,
 			operationType: OPERATION_TYPES.getEndpointList,
-			additionalDataExists: parseAdditionalData(data).additionalDataExists
+			additionalDataExists: additionalDataParsed.additionalDataExists
 		};
 	}
 }
@@ -691,6 +692,12 @@ function createUserNotifiedConnection(toWhom, data) {
 	}
 }
 
+/**
+ * 
+ * The function below disables input endpoint in neo4j
+ * 
+ * @param {*} endpoint endpoint data
+ */
 function disableEndpoint(endpoint) {
 	console.log("disableEndpoint starts");
 
