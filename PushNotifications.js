@@ -10,7 +10,7 @@
  * 		
  * Additional Parameters
  * 		
- * 		* @param {} additionalParams		{ structure must be contain at least following attributes. Sample 
+ * 		* @param {} additionalData		{ structure must be contain at least following attributes. Sample 
  * 									
  *	 									additionalData : {
 										// if additionalData passed, parameterCounts and variableNames are required
@@ -32,7 +32,7 @@ const { uri, user, password, followRequestLocKey, directFollowRequestLocKey, gro
 /**
  * constant variables
  */
-const { SUCCESS_TYPES, NOTIFICATION_REQUEST_TYPE, BOOLEAN_STRING, NOTIFICATION_TYPES, SNS_ERROR_TYPES, NUMERIC_CONSTANTS, ERROR_TYPES, RELATION_TYPES, CONNECTION_STATUS, OPERATION_TYPES } = require("./constantFile");
+const { SUCCESS_TYPES, NOTIFICATION_REQUEST_TYPE, NOTIFICATION_TYPES, SNS_ERROR_TYPES, NUMERIC_CONSTANTS, ERROR_TYPES, RELATION_TYPES, CONNECTION_STATUS, OPERATION_TYPES } = require("./constantFile");
 
 // drivers
 const aws_sdk = require('aws-sdk');
@@ -94,7 +94,7 @@ async function startPushNotificationBusiness(data, callback) {
 
 	// check if endpointDataList has value inside or not
 	function checkEndPointDataList(endpointDataList) {
-		return endpointDataList.length > 0;
+		return endpointDataList.length > NUMERIC_CONSTANTS.ZERO_INTEGER;
 	}
 };
 
@@ -226,15 +226,14 @@ function getEndpointsForItem(toWhom, data) {
 
 	return new Promise(function(resolve, reject) {
 
-		const additionalDataParsed = parseAdditionalData(data);
-		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredInputData(additionalDataParsed));
+		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredInputData(), data);
 		
 		console.log("query : ", query);
 		console.log("parameter : ", parameter);
 		
 		neo4jSession.run(query, parameter).then(result => {
 			console.log("RESULT promiseResultEndpoints : ", result);
-			resolve(getParsedData(toWhom, result, additionalDataParsed.additionalDataExists));
+			resolve(getParsedData(toWhom, result, data));
 			//resolve(result);
 		})
 		.catch(error => {
@@ -245,13 +244,11 @@ function getEndpointsForItem(toWhom, data) {
 	})
 
 	// create required inputs to get necessary query and parameters
-	function createRequiredInputData(additionalDataParsed) {
+	function createRequiredInputData() {
 		return {
 			fromWhom: data.fromWhom,
 			toWhom: toWhom,
-			requestType: data.requestType,
 			operationType: OPERATION_TYPES.getEndpointList,
-			additionalDataExists: additionalDataParsed.additionalDataExists
 		};
 	}
 }
@@ -264,14 +261,12 @@ function getEndpointsForItem(toWhom, data) {
  * @param {*} endpointResultData endpoint neo4j resul data to be parsed
  * @param {*} additionalDataExists if aditional data exist or not
  */
-function getParsedData(toWhom, endpointResultData, additionalDataExists) {
+function getParsedData(toWhom, endpointResultData, data) {
 	console.log("getParsedData starts");
 	console.log("toWhom : ", toWhom);
 	console.log("endpointResultData : ", endpointResultData);
-	console.log("additionalDataExists : ", additionalDataExists);
 
 	var endpointsAndInputData = [];
-	
 	var isUserNotifiedBefore = false;
 
 	/** 
@@ -299,13 +294,22 @@ function getParsedData(toWhom, endpointResultData, additionalDataExists) {
 			};
 	
 			// if additional data does not exists in input, it can be retrieved from neo4j retuls
-			if (!additionalDataExists) {
-				if (endpointResultData.records[0]._fields[2] !== undefined && endpointResultData.records[0]._fields[2] !== null) {
-					console.log("additional data does not exist input, so we retrieved it from neo4j")
-					temp.endpointUserRelatedData.additionalData = endpointResultData.records[0]._fields[2];
-				}
+
+			switch (returnRequesType(data)) {
+				case NOTIFICATION_REQUEST_TYPE.followRequest:
+				case NOTIFICATION_REQUEST_TYPE.createFollowDirectly:
+					if (!parseAdditionalData(data).additionalDataExists) {
+						if (endpointResultData.records[0]._fields[2] !== undefined && endpointResultData.records[0]._fields[2] !== null) {
+							console.log("additional data does not exist input, so we retrieved it from neo4j")
+							temp.endpointUserRelatedData.additionalData = endpointResultData.records[0]._fields[2];
+						}
+					}
+					break;
+			
+				default:
+					break;
 			}
-	
+
 			//pushNotifData.endpointsAndInputData.push(temp);
 			endpointsAndInputData.push(temp);
 	
@@ -318,7 +322,7 @@ function getParsedData(toWhom, endpointResultData, additionalDataExists) {
 
 	// check endpoint result data length
 	function checkEndpointResultDataLength() {
-		return endpointResultData.records.length > 0;
+		return endpointResultData.records.length > NUMERIC_CONSTANTS.ZERO_INTEGER;
 	}
 }
 
@@ -328,21 +332,39 @@ function getParsedData(toWhom, endpointResultData, additionalDataExists) {
  * 
  * @param {*} input json data contains several parameters
  */
-function returnNeo4jQueryAndParams(input) {
+function returnNeo4jQueryAndParams(input, data) {
 	console.log("returnNeo4jQueryAndParams starts");
 	console.log("fromWhom :", input.fromWhom);
 	console.log("toWhom :", input.toWhom);
-	console.log("requestType :", input.requestType);
-	console.log("additionalDataExists :", input.additionalDataExists);
 	console.log("operationType :", input.operationType);
 	console.log("endpoint :", input.endpoint);
 	
 	const fromWhom = input.fromWhom;
 	const toWhom = input.toWhom;
-	const requestType = input.requestType;
 	const operationType = input.operationType;
-	const additionalDataExists = input.additionalDataExists;
 	const endpointData = input.endpointData;
+	
+	const requestType = data.requestType;
+	console.log("requestType :", input.requestType);
+	//const groupid = ""; TypeError: Assignment to constant variable.
+	
+	// retrieve necessary data from additionData input
+	var groupid = "";
+	const additionalDataResponse = parseAdditionalData(data);
+
+	switch (returnRequesType(data)) {
+		case NOTIFICATION_REQUEST_TYPE.followRequest:
+		case NOTIFICATION_REQUEST_TYPE.createFollowDirectly: 
+			break;
+
+		case NOTIFICATION_REQUEST_TYPE.create_group:
+		case NOTIFICATION_REQUEST_TYPE.add_participant_into_group:
+			groupid = additionalDataResponse.parsedAdditionalData[2];
+			break;
+	
+		default:
+			break;
+	}
 
 	/**
 	 * query and parameter variables
@@ -350,50 +372,65 @@ function returnNeo4jQueryAndParams(input) {
 	let query = ``;
 	let parameter = {};
 
-	// const additionalDataResponse = parseAdditionalData(data);
-	// console.log("additionalDataResponse : ", additionalDataResponse);
-
 	switch (operationType) {
 		case OPERATION_TYPES.getEndpointList:
-		
-			if (additionalDataExists) {
+			console.log("1");
+			// additional data exists
+			if (additionalDataResponse.additionalDataExists) {
+				console.log("2");
 				switch (requestType) {
 					case NOTIFICATION_REQUEST_TYPE.followRequest:
+						console.log("3");
 						query = `match (requestedUser:User {userid:$toWhomValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusVaule}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint return exists((:User {userid:$toWhomValue})<-[:${NOTIFICATION_TYPES.NOTIFIED_PENDING_FRIEND_REQUEST}]-(:User {userid:$fromWhomValue})), collect(endpoint)`;
 						parameter = { toWhomValue: toWhom, fromWhomValue: fromWhom, statusVaule: CONNECTION_STATUS.loggedin, isEnabledValue: true };
 						break;
 						
 					case NOTIFICATION_REQUEST_TYPE.createFollowDirectly:
+						console.log("4");
 						query = `match (requestedUser:User {userid:$toWhomValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusVaule}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint return exists((:User {userid:$toWhomValue})<-[:${NOTIFICATION_TYPES.NOTIFIED_FOLLOWS}]-(:User {userid:$fromWhomValue})), collect(endpoint)`
 						parameter = { toWhomValue: toWhom, fromWhomValue: fromWhom, statusVaule: CONNECTION_STATUS.loggedin, isEnabledValue: true };
 						break;
 	
 					case NOTIFICATION_REQUEST_TYPE.create_group:
+						console.log("5");
 						query = `match (participant:User {userid:$participantUseridValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusValue}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint return exists((:Group {groupid:$groupidValue})-[:${NOTIFICATION_TYPES.NOTIFIED_GROUP_CREATED}]->(:User {userid:$participantUseridValue})), collect(endpoint)`
-						parameter = { participantUseridValue: data.currentParticipant.participantUserid, groupidValue: data.createdGroupInfo.groupid, statusValue: CONNECTION_STATUS.loggedin, isEnabledValue: true };
+						parameter = { participantUseridValue: toWhom, groupidValue: groupid, statusValue: CONNECTION_STATUS.loggedin, isEnabledValue: true };
+						break;
+
+					case NOTIFICATION_REQUEST_TYPE.add_participant_into_group:
+						console.log("18");
+						query = `match (participant:User {userid:$participantUseridValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusValue}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint return exists((:Group {groupid:$groupidValue})-[:${NOTIFICATION_TYPES.NOTIFIED_GROUP_CREATED}|${NOTIFICATION_TYPES.NOTIFIED_ADDED_TO_GROUP}]->(:User {userid:$participantUseridValue})), collect(endpoint)`
+						parameter = { participantUseridValue: toWhom, groupidValue: groupid, statusValue: CONNECTION_STATUS.loggedin, isEnabledValue: true };
 						break;
 	
 					default:
+						console.log("6");
 						break;
 				}
 			} else {
+				console.log("7");
+				// additional data does not exist
 				switch (requestType) {
 					case NOTIFICATION_REQUEST_TYPE.followRequest:
+						console.log("8");
 						query = `match (requestedUser:User {userid:$toWhomValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusVaule}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint match(requesterUser:User {userid:$fromWhomValue}) with requesterUser, endpoint return exists((:User {userid:$toWhomValue})<-[:${NOTIFICATION_TYPES.NOTIFIED_PENDING_FRIEND_REQUEST}]-(:User {userid:$fromWhomValue})), collect(endpoint), requesterUser{.username, .name}`;
 						parameter = { toWhomValue: toWhom, fromWhomValue: fromWhom, statusVaule: CONNECTION_STATUS.loggedin, isEnabledValue: true };
 						break;
 						
 					case NOTIFICATION_REQUEST_TYPE.createFollowDirectly:
+						console.log("9");
 						query = `match (requestedUser:User {userid:$toWhomValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusVaule}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint match(requesterUser:User {userid:$fromWhomValue}) with requesterUser, endpoint return exists((:User {userid:$toWhomValue})<-[:${NOTIFICATION_TYPES.NOTIFIED_FOLLOWS}]-(:User {userid:$fromWhomValue})), collect(endpoint), requesterUser{.username, .name}`
 						parameter = { toWhomValue: toWhom, fromWhomValue: fromWhom, statusVaule: CONNECTION_STATUS.loggedin, isEnabledValue: true };
 						break;
 	
-					case NOTIFICATION_REQUEST_TYPE.create_group:
-						query = `match (participant:User {userid:$participantUseridValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusValue}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint return exists((:Group {groupid:$groupidValue})-[:${NOTIFICATION_TYPES.NOTIFIED_GROUP_CREATED}]->(:User {userid:$participantUseridValue})), collect(endpoint)`
-						parameter = { participantUseridValue: data.currentParticipant.participantUserid, groupidValue: data.createdGroupInfo.groupid, statusValue: CONNECTION_STATUS.loggedin, isEnabledValue: true };
-						break;
+					// case NOTIFICATION_REQUEST_TYPE.create_group:
+					// 	console.log("10");
+					// 	query = `match (participant:User {userid:$participantUseridValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusValue}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint return exists((:Group {groupid:$groupidValue})-[:${NOTIFICATION_TYPES.NOTIFIED_GROUP_CREATED}]->(:User {userid:$participantUseridValue})), collect(endpoint)`
+					// 	parameter = { participantUseridValue: data.currentParticipant.participantUserid, groupidValue: data.createdGroupInfo.groupid, statusValue: CONNECTION_STATUS.loggedin, isEnabledValue: true };
+					// 	break;
 	
 					default:
+						console.log("11");
 						break;
 				}
 			}
@@ -401,30 +438,41 @@ function returnNeo4jQueryAndParams(input) {
 			break;
 
 		case OPERATION_TYPES.createNotifiedConnection:
-
-			console.log("TAKA 2");
-
+			console.log("12");
 			switch (requestType) {
 				case NOTIFICATION_REQUEST_TYPE.followRequest:
-					console.log("TAKA 3");
+					console.log("13");
 					query = `match (requestedUser:User {userid:$toWhomValue}) match (requesterUser:User {userid:$fromWhomValue}) create (requesterUser)-[:${NOTIFICATION_TYPES.NOTIFIED_PENDING_FRIEND_REQUEST}]->(requestedUser)`
 					parameter = { toWhomValue: toWhom, fromWhomValue: fromWhom };
 					break;
 					
 				case NOTIFICATION_REQUEST_TYPE.createFollowDirectly:
-					console.log("TAKA 4");
+					console.log("14");
 					query = `match (requestedUser:User {userid:$toWhomValue}) match (requesterUser:User {userid:$fromWhomValue}) create (requesterUser)-[:${NOTIFICATION_TYPES.NOTIFIED_FOLLOWS}]->(requestedUser)`
 					parameter = { toWhomValue: toWhom, fromWhomValue: fromWhom };
 					break;
+				
+				case NOTIFICATION_REQUEST_TYPE.create_group:
+					console.log("15");
+					query = `match (participant:User {userid:$participantUseridValue}) match (group:Group {groupid:$groupidValue}) create (group)-[:${NOTIFICATION_TYPES.NOTIFIED_GROUP_CREATED}]->(participant)`
+					parameter = { participantUseridValue: toWhom, groupidValue: groupid };
+					break;
+				
+				case NOTIFICATION_REQUEST_TYPE.add_participant_into_group:
+					console.log("17");
+					query = `match (participant:User {userid:$participantUseridValue}) match (group:Group {groupid:$groupidValue}) create (group)-[:${NOTIFICATION_TYPES.NOTIFIED_ADDED_TO_GROUP}]->(participant)`
+					parameter = { participantUseridValue: toWhom, groupidValue: groupid };
+					break;
 					
 				default:
+					console.log("16");
 					break;
 			}
 				
 			break;
 		
 		case OPERATION_TYPES.disableEndpoint:
-			console.log("TAKA 3");
+			console.log("16");
 			query = `match (endpoint:Endpoint {arn:$arnValue}) set endpoint.isEnabled = $isEnabledValue`
 			parameter = { arnValue: endpointData.properties.arn, isEnabledValue: false };
 			break;
@@ -469,7 +517,7 @@ function parseAdditionalData(data) {
 			const variableNamesArray = data.additionalData.variableNames;
 	
 			if (Array.isArray(variableNamesArray)) {
-				if (variableNamesArray.length > 0) {
+				if (variableNamesArray.length > NUMERIC_CONSTANTS.ZERO_INTEGER) {
 	
 					response.additionalDataExists = true
 			
@@ -576,6 +624,7 @@ function returnLocKeyData(data) {
 		case NOTIFICATION_REQUEST_TYPE.createFollowDirectly:
 			return directFollowRequestLocKey
 		case NOTIFICATION_REQUEST_TYPE.create_group:
+		case NOTIFICATION_REQUEST_TYPE.add_participant_into_group:
 			return groupCreateLocKey
 		default:
 			break;
@@ -591,12 +640,17 @@ function returnLocKeyData(data) {
  */
 function returnLocArgData(data) {
 	
+	const additionalDataResponse = parseAdditionalData(data);
+	console.log("additionalDataResponse : ", additionalDataResponse);
+
 	switch (returnRequesType(data)) {
 		case NOTIFICATION_REQUEST_TYPE.followRequest:
 		case NOTIFICATION_REQUEST_TYPE.createFollowDirectly:
 			return [returnSenderInfo(data)];
 		case NOTIFICATION_REQUEST_TYPE.create_group:
-			return ["deneme1", "deneme2"];
+		case NOTIFICATION_REQUEST_TYPE.add_participant_into_group:
+			// first index should contain fromWhom username or name, second index should contain group name which could be retrieved from additional data
+			return [additionalDataResponse.parsedAdditionalData[0], additionalDataResponse.parsedAdditionalData[3]];
 		default:
 			break;
 	}
@@ -665,7 +719,7 @@ function createUserNotifiedConnection(toWhom, data) {
 
 	return new Promise(function(resolve, reject) {
 
-		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredParameters());
+		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredParameters(), data);
 
 		console.log("query		: ", query);
 		console.log("parameter	: ", parameter);
@@ -686,7 +740,6 @@ function createUserNotifiedConnection(toWhom, data) {
 		return {
 			fromWhom: data.fromWhom,
 			toWhom: toWhom,
-			requestType: data.requestType,
 			operationType: OPERATION_TYPES.createNotifiedConnection,
 		};
 	}
@@ -703,7 +756,7 @@ function disableEndpoint(endpoint) {
 
 	return new Promise(function(resolve, reject) { 
 
-		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredParameters);
+		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredParameters());
 
 		neo4jSession.run(query, parameter).then(result => {
 			console.log("RESULT disableEndpoint : ", result);
@@ -790,13 +843,22 @@ function initializeReponseVariables() {
 function inputValidation(event) {
 	console.debug("inputValidation starts");
 
+	if (event.requestType === undefined || event.requestType === '' || event.requestType === null) {
+		return ERROR_TYPES.INVALID_REQUEST_TYPE
+	} else {
+		if (event.requestType === NOTIFICATION_REQUEST_TYPE.create_group) {
+			if (event.additionalData === undefined || event.additionalData === '' || event.additionalData === null) {
+				return ERROR_TYPES.INVALID_ADDITIONAL_DATA
+			}
+		}
+	}
 	if (event.fromWhom === undefined || event.fromWhom === '' || event.fromWhom === null) {
 		return ERROR_TYPES.INVALID_USERID
 	} 
 	if (event.toWhoms === undefined || event.toWhoms === '' || event.toWhoms === null) {
 		return ERROR_TYPES.INVALID_USERID
 	} 
-	if (event.toWhoms.length <= 0) {
+	if (event.toWhoms.length <= NUMERIC_CONSTANTS.ZERO_INTEGER) {
 		return ERROR_TYPES.INVALID_RECEIVER_COUNT
 	}
 	// if everything is fine, return success
@@ -853,6 +915,9 @@ function getErrorMessage(error) {
 			break;
 		case -108:
 			message = "Invalid notification receiver count";
+			break;
+		case -109:
+			message = "Additional data is missing, it's required for group creation process";
 			break;
 		case -200:
 			message = "Missing group infomation";
