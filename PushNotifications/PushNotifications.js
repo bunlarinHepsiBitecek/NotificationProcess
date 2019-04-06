@@ -47,7 +47,6 @@ module.exports.handler = function (event, context, callback) {
 	console.log("PushNotifications service invoked");
 	console.log("event : ", event);
 
-	
 	let inputValidationResult = inputValidation(event);
 	console.log("inputValidationResult : ", inputValidationResult);
 	if (inputValidationResult !== SUCCESS_TYPES.SUCCESS) {
@@ -117,7 +116,9 @@ async function getUserNotifiedInfoAndActiveEndpoints(serviceInput) {
 
 		try {
 			const endpointResult = await getEndpointsForItem(toWhom, serviceInput);
-			// merge arrays
+			// every each one of user (toWhom), it's possible to return a number of endpoint array. Therefore, we need to merge coming arrays and make it a 
+			// total endpoint array data, to loop it and send push notifications. At the final step, this function returns an array containing the endpoints of all 
+			// input users
 			console.log("endpointResult : ", endpointResult);
 			totalEndpointData = totalEndpointData.concat(endpointResult);
 			
@@ -168,7 +169,7 @@ async function startSendingPushNotificationProcess(endpointDataList, data, callb
 				
 				console.log("ERROR startSendingPushNotificationProcess : ", error);
 				try {
-					const resultDisableEndPointInNeo4j = await disableEndpoint(endpointData);
+					const resultDisableEndPointInNeo4j = await disableEndpoint(endpointData, data);
 					console.log("RESULT resultDisableEndPointInNeo4j : ", resultDisableEndPointInNeo4j);
 				} catch (error) {
 					console.log("ERROR resultDisableEndPointInNeo4j : ", error);
@@ -223,7 +224,7 @@ async function startCreationNotifiedConnections(markedUsersArray, data) {
  * @param {*} data main service input data
  */
 function getEndpointsForItem(toWhom, data) {
-
+	console.log("getEndpointsForItem starts");
 	return new Promise(function(resolve, reject) {
 
 		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredInputData(), data);
@@ -233,8 +234,9 @@ function getEndpointsForItem(toWhom, data) {
 		
 		neo4jSession.run(query, parameter).then(result => {
 			console.log("RESULT promiseResultEndpoints : ", result);
-			resolve(getParsedData(toWhom, result, data));
-			//resolve(result);
+			// need to be checked about neo4j returns any record. Because, when node does not exist in neo4j, system does not return an error. Therefore 
+			// for the results does not have any record value inside, we should not parse that data.
+			checkAndParseResultData(result, resolve, reject);
 		})
 		.catch(error => {
 			console.log("ERROR promiseResultEndpoints : ", error);
@@ -242,6 +244,17 @@ function getEndpointsForItem(toWhom, data) {
 		});
 
 	})
+
+	function checkAndParseResultData(result, resolve, reject) {
+		if (result.records.length > NUMERIC_CONSTANTS.ZERO_INTEGER) {
+			console.log("data var");
+			resolve(getParsedData(toWhom, result, data));
+		}
+		else {
+			console.log("data yok");
+			reject(ERROR_TYPES.NEO4J_ENDPOINT_NOT_EXIST);
+		}
+	}
 
 	// create required inputs to get necessary query and parameters
 	function createRequiredInputData() {
@@ -251,6 +264,7 @@ function getEndpointsForItem(toWhom, data) {
 			operationType: OPERATION_TYPES.getEndpointList,
 		};
 	}
+	
 }
 
 /**
@@ -277,53 +291,43 @@ function getParsedData(toWhom, endpointResultData, data) {
 
 	console.log("endpointResultData.records.length : ", endpointResultData.records.length);
 	
-	// if there is a data coming from neo4j, run the process. Otherwise, do not proceede
-	if (checkEndpointResultDataLength()) {
-		
-		isUserNotifiedBefore = endpointResultData.records[0]._fields[0];
-	
-		endpointResultData.records[0]._fields[1].forEach(function(item) {
-			console.log("item : ", item.properties);
-	
-			var temp = {
-				properties : item.properties,
-				endpointUserRelatedData : {
-					endpointOwner : toWhom,
-					isUserNotifiedBefore : isUserNotifiedBefore
-				}
-			};
-	
-			// if additional data does not exists in input, it can be retrieved from neo4j retuls
+	isUserNotifiedBefore = endpointResultData.records[0]._fields[0];
 
-			switch (returnRequesType(data)) {
-				case NOTIFICATION_REQUEST_TYPE.followRequest:
-				case NOTIFICATION_REQUEST_TYPE.createFollowDirectly:
-					if (!parseAdditionalData(data).additionalDataExists) {
-						if (endpointResultData.records[0]._fields[2] !== undefined && endpointResultData.records[0]._fields[2] !== null) {
-							console.log("additional data does not exist input, so we retrieved it from neo4j")
-							temp.endpointUserRelatedData.additionalData = endpointResultData.records[0]._fields[2];
-						}
-					}
-					break;
-			
-				default:
-					break;
+	endpointResultData.records[0]._fields[1].forEach(function(item) {
+		console.log("item : ", item.properties);
+
+		var temp = {
+			properties : item.properties,
+			endpointUserRelatedData : {
+				endpointOwner : toWhom,
+				isUserNotifiedBefore : isUserNotifiedBefore
 			}
+		};
 
-			//pushNotifData.endpointsAndInputData.push(temp);
-			endpointsAndInputData.push(temp);
-	
-		})
-	
-		console.log("endpointsAndInputData : ", endpointsAndInputData);
-		return endpointsAndInputData;
-	
-	}
+		// if additional data does not exists in input, it can be retrieved from neo4j retuls
+		switch (returnRequesType(data)) {
+			case NOTIFICATION_REQUEST_TYPE.followRequest:
+			case NOTIFICATION_REQUEST_TYPE.createFollowDirectly:
+				if (!parseAdditionalData(data).additionalDataExists) {
+					if (endpointResultData.records[0]._fields[2] !== undefined && endpointResultData.records[0]._fields[2] !== null) {
+						console.log("additional data does not exist input, so we retrieved it from neo4j")
+						temp.endpointUserRelatedData.additionalData = endpointResultData.records[0]._fields[2];
+					}
+				}
+				break;
+		
+			default:
+				break;
+		}
 
-	// check endpoint result data length
-	function checkEndpointResultDataLength() {
-		return endpointResultData.records.length > NUMERIC_CONSTANTS.ZERO_INTEGER;
-	}
+		//pushNotifData.endpointsAndInputData.push(temp);
+		endpointsAndInputData.push(temp);
+
+	})
+
+	console.log("endpointsAndInputData : ", endpointsAndInputData);
+	return endpointsAndInputData;
+	
 }
 
 /**
@@ -344,7 +348,8 @@ function returnNeo4jQueryAndParams(input, data) {
 	const operationType = input.operationType;
 	const endpointData = input.endpointData;
 	
-	const requestType = data.requestType;
+	const requestType = returnRequestTypeFromDataInput(data);
+
 	console.log("requestType :", input.requestType);
 	//const groupid = ""; TypeError: Assignment to constant variable.
 	
@@ -423,12 +428,6 @@ function returnNeo4jQueryAndParams(input, data) {
 						parameter = { toWhomValue: toWhom, fromWhomValue: fromWhom, statusVaule: CONNECTION_STATUS.loggedin, isEnabledValue: true };
 						break;
 	
-					// case NOTIFICATION_REQUEST_TYPE.create_group:
-					// 	console.log("10");
-					// 	query = `match (participant:User {userid:$participantUseridValue})-[connection:${RELATION_TYPES.CONNECTED} {status:$statusValue}]->(endpoint:Endpoint {isEnabled:$isEnabledValue}) with endpoint return exists((:Group {groupid:$groupidValue})-[:${NOTIFICATION_TYPES.NOTIFIED_GROUP_CREATED}]->(:User {userid:$participantUseridValue})), collect(endpoint)`
-					// 	parameter = { participantUseridValue: data.currentParticipant.participantUserid, groupidValue: data.createdGroupInfo.groupid, statusValue: CONNECTION_STATUS.loggedin, isEnabledValue: true };
-					// 	break;
-	
 					default:
 						console.log("11");
 						break;
@@ -484,6 +483,15 @@ function returnNeo4jQueryAndParams(input, data) {
 	console.log("parameter : ", parameter);
 
 	return { query, parameter };
+
+	// create required inputs to get necessary query and parameters
+	function returnRequestTypeFromDataInput(data) {
+		if (data !== undefined && data !== null) {
+			return data.requestType
+		} else {
+			return null
+		}
+	}
 
 }
 
@@ -578,34 +586,34 @@ function publishPushNotification(snsDriver, endpointData, data) {
 		// then have to stringify the entire message payload
 		payload = JSON.stringify(payload);
 	
-		var params = {
-			//Message: JSON.stringify(message),
-			Message: payload,
-			MessageStructure: 'json',
-			Subject: 'CatchU',
-			TargetArn: endpointData.properties.arn
-		};
+			var params = {
+				//Message: JSON.stringify(message),
+				Message: payload,
+				MessageStructure: 'json',
+				Subject: 'CatchU',
+				TargetArn: endpointData.properties.arn
+			};
 
-		snsDriver.publish(params, function(error, data) {
-			if (error) {
-				if (error.code === SNS_ERROR_TYPES.EndpointDisabled) {
-					// delete from SNS, delete from neo4j async
-					// deleteEndpointFromSNSandNeo4j(endpoint, sns);
-					console.log("error.code : ", error.code);
-					response.responseData = endpointData;
-					response.responseCode = ERROR_TYPES.FAILED_PUSH_NOTIF_DISABLE_ENDPOINT;
-					reject(response);
+			snsDriver.publish(params, function(error, data) {
+				if (error) {
+					if (error.code === SNS_ERROR_TYPES.EndpointDisabled) {
+						// delete from SNS, delete from neo4j async
+						// deleteEndpointFromSNSandNeo4j(endpoint, sns);
+						console.log("error.code : ", error.code);
+						response.responseData = endpointData;
+						response.responseCode = ERROR_TYPES.FAILED_PUSH_NOTIF_DISABLE_ENDPOINT;
+						reject(response);
+					}
+
+				} else { 
+					/**
+					 * A succesful notif is enough for us. Let's create a connection between requester and requested user about 
+					 * notification is send. In order not to send notification again, not to disturb mobile app end users 
+					 */
+					console.log("SNS publishPushNotification data : ", data);
+					resolve(response);
 				}
-
- 			} else { 
-				/**
-				 * A succesful notif is enough for us. Let's create a connection between requester and requested user about 
-				 * notification is send. In order not to send notification again, not to disturb mobile app end users 
-				 */
-				console.log("SNS publishPushNotification data : ", data);
-				resolve(response);
-			}
-		})
+			})
 	})
 
 }
@@ -751,12 +759,12 @@ function createUserNotifiedConnection(toWhom, data) {
  * 
  * @param {*} endpoint endpoint data
  */
-function disableEndpoint(endpoint) {
+function disableEndpoint(endpoint, data) {
 	console.log("disableEndpoint starts");
 
 	return new Promise(function(resolve, reject) { 
 
-		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredParameters());
+		var { query, parameter } = returnNeo4jQueryAndParams(createRequiredParameters(), data);
 
 		neo4jSession.run(query, parameter).then(result => {
 			console.log("RESULT disableEndpoint : ", result);
